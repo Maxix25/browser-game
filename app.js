@@ -11,53 +11,72 @@ const PORT = process.env.PORT || 3000
 const __dirname = path.dirname(new URL(import.meta.url).pathname);
 const SOCKET_LIST = {}; // Create socket list
 const PLAYER_LIST = {}; // Create player's list
-const Player = (id) => {
+
+const Entity = () => {
     const self = {
-        x:250,
-        y:250,
-        id:id,
-        number:Math.floor(Math.random() * 10),
-        pressingUp: false,
-        pressingDown: false,
-        pressingRight: false,
-        pressingLeft: false,
-        maxSpd: 10
+        x: 250,
+        y: 250,
+        spdX: 0,
+        spdY: 0,
+        id: ""
+    }
+    self.update = () => {
+        self.updatePosition();
     }
     self.updatePosition = () => {
-        if (self.pressingUp){
-            self.y -= self.maxSpd;
-        }
-        if (self.pressingDown){
-            self.y += self.maxSpd;
-        }
-        if (self.pressingRight){
-            self.x += self.maxSpd;
-        }
-        if (self.pressingLeft){
-            self.x -= self.maxSpd;
-        }
+        self.x += self.spdX;
+        self.y += self.spdY;
     }
     return self;
 }
 
-
-app.get("/", (req, res) => {
-    res.sendFile(__dirname + "/client/index.html");
-});
-
-app.use("/client", express.static(__dirname + "/client"));
-io.sockets.on("connection", (socket) => {
-    socket.id = Math.random();
-    SOCKET_LIST[socket.id] = socket // Pushing the socket to the socket list
-    const player = Player(socket.id);
-    PLAYER_LIST[socket.id] = player
-    console.log("Someone connected!");
-    socket.on("disconnect", () =>{
-        delete SOCKET_LIST[socket.id];
-        delete PLAYER_LIST[socket.id];
-    });
+const Player = (id) => {
+    const self = Entity();
+    const maxSpd = 10;
+    const super_update = self.update
+    self.id = id;
+    self.number = "" + Math.floor(10 * Math.random());
+    self.pressingRight = false;
+    self.pressingLeft = false;
+    self.pressingUp = false;
+    self.pressingDown = false;
+    self.update = () => {
+        self.updateSpd();
+        super_update();
+    }
+    self.updateSpd = () => {
+        if (self.pressingUp)
+        {
+            self.spdY = -maxSpd;
+        }
+        else if (self.pressingDown)
+        {
+            self.spdY = maxSpd;
+        }
+        else
+        {
+            self.spdY = 0
+        }
+        if (self.pressingRight)
+        {
+            self.spdX = maxSpd;
+        }
+        else if (self.pressingLeft)
+        {
+            self.spdX = -maxSpd;
+        }
+        else
+        {
+            self.spdX = 0
+        }
+    }
+    Player.list[id] = self;
+    return self;
+}
+Player.list = {};
+Player.onConnect = (socket) => {
+    const player = Player(socket.id)
     socket.on("keyPress", (key) => {
-        console.log(`The key pressed is ${key.inputId} and the state is ${key.state}`)
         switch (key.inputId)
         {
             case "Up":
@@ -73,20 +92,49 @@ io.sockets.on("connection", (socket) => {
                 player.pressingRight = key.state;
                 break;
         }
-    })
-});
+    });
+}
 
-setInterval(function (){
+Player.onDisconnect = (socket) => {
+    delete Player.list[socket.id]
+}
+
+Player.update = () => {
     let pack = [];
-    for(let i in PLAYER_LIST){
-        let player = PLAYER_LIST[i]
-        player.updatePosition()
+    for(let i in Player.list){
+        let player = Player.list[i]
+        player.update()
         pack.push({
             x: player.x,
             y: player.y,
             number: player.number
         });
     }
+    return pack;
+}
+
+
+app.get("/", (req, res) => {
+    res.sendFile(__dirname + "/client/index.html");
+});
+
+
+app.use("/client", express.static(__dirname + "/client"));
+
+io.sockets.on("connection", (socket) => {
+    socket.id = Math.random();
+    SOCKET_LIST[socket.id] = socket // Pushing the socket to the socket list
+    Player.onConnect(socket);
+    console.log("Someone connected!");
+    socket.on("disconnect", () =>{
+        delete SOCKET_LIST[socket.id];
+        Player.onDisconnect(socket);
+    });
+
+});
+
+setInterval(function (){
+    let pack = Player.update();
     for(let i in SOCKET_LIST){
         let socket = SOCKET_LIST[i]
         socket.emit("newPositions", pack)
