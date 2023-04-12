@@ -10,7 +10,7 @@ const io = new Server(serv)
 const PORT = process.env.PORT || 3000
 const __dirname = path.dirname(new URL(import.meta.url).pathname);
 const SOCKET_LIST = {}; // Create socket list
-const PLAYER_LIST = {}; // Create player's list
+const DEBUG = true;
 
 const Entity = () => {
     const self = {
@@ -73,7 +73,29 @@ const Player = (id) => {
     Player.list[id] = self;
     return self;
 }
+
+const Bullet = (angle) => {
+    const self = Entity();
+    self.id = Math.random();
+    self.spdX = Math.cos(angle/180*Math.PI) * 10;
+    self.spdY = Math.sin(angle/180*Math.PI) * 10;
+    self.timer = 0;
+    self.toRemove = false;
+    const super_update = self.update;
+    self.update = () => {
+        if (self.timer++ > 100)
+        {
+            self.toRemove = true;
+        }
+        super_update();
+    
+    }
+    Bullet.list[self.id] = self;
+    return self;
+}
+
 Player.list = {};
+Bullet.list = {};
 Player.onConnect = (socket) => {
     const player = Player(socket.id)
     socket.on("keyPress", (key) => {
@@ -98,6 +120,23 @@ Player.onConnect = (socket) => {
 Player.onDisconnect = (socket) => {
     delete Player.list[socket.id]
 }
+
+Bullet.update = () => {
+    if (Math.random() < 0.1){
+        Bullet(Math.random() * 360);
+    }
+    let pack = [];
+    for(let i in Bullet.list){
+        let bullet = Bullet.list[i]
+        bullet.update()
+        pack.push({
+            x: bullet.x,
+            y: bullet.y
+        });
+    }
+    return pack;
+}
+
 
 Player.update = () => {
     let pack = [];
@@ -130,11 +169,27 @@ io.sockets.on("connection", (socket) => {
         delete SOCKET_LIST[socket.id];
         Player.onDisconnect(socket);
     });
+    socket.on("sendMsgToServer", (data) => {
+        const playerName = ("" + socket.id).slice(2, 7);
+        for (let i in SOCKET_LIST){
+            SOCKET_LIST[i].emit("addToChat", playerName + ":" + data);
+        }
+    });
+    socket.on('evalServer', (data) => {
+        if (!DEBUG){
+            return;
+        }
+        const res = eval(data);
+        socket.emit("evalAnswer", res);
+    })
 
 });
 
 setInterval(function (){
-    let pack = Player.update();
+    let pack = {
+        player: Player.update(),
+        bullet: Bullet.update()
+    }
     for(let i in SOCKET_LIST){
         let socket = SOCKET_LIST[i]
         socket.emit("newPositions", pack)
